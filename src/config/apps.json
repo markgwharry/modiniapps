@@ -1,0 +1,20 @@
+[
+  {
+    "slug": "analytics",
+    "name": "Analytics Dashboard",
+    "description": "Business intelligence dashboards and reporting.",
+    "url": "https://analytics.example.com"
+  },
+  {
+    "slug": "crm",
+    "name": "Customer CRM",
+    "description": "Manage customer relationships and sales pipelines.",
+    "url": "https://crm.example.com"
+  },
+  {
+    "slug": "support",
+    "name": "Support Suite",
+    "description": "Ticketing and customer support tooling.",
+    "url": "https://support.example.com"
+  }
+]

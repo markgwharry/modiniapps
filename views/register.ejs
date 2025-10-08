@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create account · Modini Apps</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <div class="navbar">
+          <div>
+            <h1>Create your Modini Apps login</h1>
+            <p>One identity to reach every application on the VPS.</p>
+          </div>
+          <button class="theme-toggle" type="button" data-theme-toggle>
+            Toggle theme
+          </button>
+        </div>
+
+        <% if (error) { %>
+        <div class="alert"><%= error %></div>
+        <% } %>
+
+        <form method="POST" action="/auth/register">
+          <input type="hidden" name="redirect" value="<%= redirect || '' %>" />
+          <div>
+            <label for="email">Email address</label>
+            <input type="email" id="email" name="email" placeholder="you@example.com" required />
+          </div>
+          <div>
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" placeholder="Create a strong password" required />
+          </div>
+          <div>
+            <label for="confirmPassword">Confirm password</label>
+            <input
+              type="password"
+              id="confirmPassword"
+              name="confirmPassword"
+              placeholder="Re-type your password"
+              required
+            />
+          </div>
+          <button type="submit">Create account</button>
+        </form>
+
+        <p>
+          Already have access?
+          <a class="button secondary" href="/login<% if (redirect) { %>?redirect=<%= encodeURIComponent(redirect) %><% } %>">Sign in</a>
+        </p>
+      </div>
+      <p class="footer">
+        Your credentials stay on this gateway and protect every downstream app.
+      </p>
+    </div>
+    <script>
+      const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+      const currentTheme = localStorage.getItem('theme');
+      if (currentTheme === 'light' || (!currentTheme && prefersLight)) {
+        document.body.classList.add('light');
+      }
+      document.querySelector('[data-theme-toggle]').addEventListener('click', () => {
+        document.body.classList.toggle('light');
+        const theme = document.body.classList.contains('light') ? 'light' : 'dark';
+        localStorage.setItem('theme', theme);
+      });
+    </script>
+  </body>
+</html>
