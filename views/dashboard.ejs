@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your apps · Modini Apps</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <div class="navbar">
+          <div>
+            <h1>Welcome back<% if (currentUser) { %>, <%= currentUser.email %><% } %>!</h1>
+            <p>Select one of the applications below to open it in a new tab.</p>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <button class="theme-toggle" type="button" data-theme-toggle>Toggle theme</button>
+            <form method="POST" action="/auth/logout">
+              <button class="secondary" type="submit">Sign out</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="app-grid">
+          <% apps.forEach(function(app) { %>
+          <div class="app-card">
+            <div>
+              <h3><%= app.name %></h3>
+              <p><%= app.description %></p>
+            </div>
+            <a class="button" href="/apps/<%= app.slug %>" target="_blank" rel="noopener">Open <%= app.name %></a>
+            <small><%= app.url %></small>
+          </div>
+          <% }) %>
+        </div>
+      </div>
+      <p class="footer">
+        Sessions are shared across subdomains so that downstream apps can validate your access via the <code>/api/auth/session</code> endpoint.
+      </p>
+    </div>
+    <script>
+      const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+      const currentTheme = localStorage.getItem('theme');
+      if (currentTheme === 'light' || (!currentTheme && prefersLight)) {
+        document.body.classList.add('light');
+      }
+      document.querySelector('[data-theme-toggle]').addEventListener('click', () => {
+        document.body.classList.toggle('light');
+        const theme = document.body.classList.contains('light') ? 'light' : 'dark';
+        localStorage.setItem('theme', theme);
+      });
+    </script>
+  </body>
+</html>
