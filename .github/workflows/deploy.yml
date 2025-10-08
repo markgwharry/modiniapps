@@ -18,20 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add SSH key for server deploy
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.SSH_PRIVATE_KEY_AUTH }}
-
-      - name: Trust server host
+      - name: Setup SSH and deploy
         run: |
           mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_AUTH }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Trigger deploy script on server
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: vpsadmin
-        run: |
-          ssh -o IdentitiesOnly=yes ${DEPLOY_USER}@${DEPLOY_HOST}
+          ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa vpsadmin@${{ secrets.DEPLOY_HOST }} "/home/vpsadmin/work/apps/auth/ops/deploy_wrapper.sh"
