@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Panel · Modini Apps</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+    <style>
+      .admin-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 2rem 0;
+      }
+      .admin-table th,
+      .admin-table td {
+        padding: 1rem;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      .admin-table th {
+        background-color: #f4f4f4;
+        font-weight: bold;
+      }
+      .admin-table .actions {
+        display: flex;
+        gap: 0.5rem;
+      }
+      .admin-table button {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+      }
+      .admin-table .status-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: bold;
+      }
+      .admin-table .status-badge.approved {
+        background-color: #d4edda;
+        color: #155724;
+      }
+      .admin-table .status-badge.pending {
+        background-color: #fff3cd;
+        color: #856404;
+      }
+      .admin-table .status-badge.admin {
+        background-color: #d1ecf1;
+        color: #0c5460;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="content-wrapper">
+        <div class="header">
+          <h1>Admin Panel</h1>
+          <p>Manage user accounts and permissions</p>
+          <a href="/" class="button secondary">← Back to Dashboard</a>
+        </div>
+
+        <% if (users.length === 0) { %>
+          <p>No users found.</p>
+        <% } else { %>
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% users.forEach(user => { %>
+                <tr>
+                  <td><%= user.id %></td>
+                  <td><%= user.email %></td>
+                  <td>
+                    <% if (user.approved) { %>
+                      <span class="status-badge approved">Approved</span>
+                    <% } else { %>
+                      <span class="status-badge pending">Pending</span>
+                    <% } %>
+                  </td>
+                  <td>
+                    <% if (user.isAdmin) { %>
+                      <span class="status-badge admin">Admin</span>
+                    <% } else { %>
+                      User
+                    <% } %>
+                  </td>
+                  <td><%= new Date(user.createdAt).toLocaleDateString() %></td>
+                  <td>
+                    <div class="actions">
+                      <% if (!user.approved) { %>
+                        <form method="POST" action="/admin/users/<%= user.id %>/approve" style="display: inline;">
+                          <button type="submit" class="button">Approve</button>
+                        </form>
+                      <% } else { %>
+                        <form method="POST" action="/admin/users/<%= user.id %>/unapprove" style="display: inline;">
+                          <button type="submit" class="button secondary">Unapprove</button>
+                        </form>
+                      <% } %>
+                      
+                      <% if (!user.isAdmin) { %>
+                        <form method="POST" action="/admin/users/<%= user.id %>/make-admin" style="display: inline;">
+                          <button type="submit" class="button">Make Admin</button>
+                        </form>
+                      <% } else if (user.id !== currentUser.id) { %>
+                        <form method="POST" action="/admin/users/<%= user.id %>/remove-admin" style="display: inline;">
+                          <button type="submit" class="button secondary">Remove Admin</button>
+                        </form>
+                      <% } %>
+                    </div>
+                  </td>
+                </tr>
+              <% }); %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </div>
+  </body>
+</html>
+

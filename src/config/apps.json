@@ -1,20 +1,20 @@
 [
   {
-    "slug": "analytics",
-    "name": "Analytics Dashboard",
-    "description": "Business intelligence dashboards and reporting.",
-    "url": "https://analytics.example.com"
+    "slug": "dart",
+    "name": "DART 250",
+    "description": "Flight Termination Explorer - aviation safety and compliance analysis.",
+    "url": "https://dart.modiniapps.co.uk"
   },
   {
-    "slug": "crm",
-    "name": "Customer CRM",
-    "description": "Manage customer relationships and sales pipelines.",
-    "url": "https://crm.example.com"
+    "slug": "skylens",
+    "name": "Skylens",
+    "description": "Engineering and operations monitoring and analytics.",
+    "url": "https://skylens.modiniapps.co.uk"
   },
   {
-    "slug": "support",
-    "name": "Support Suite",
-    "description": "Ticketing and customer support tooling.",
-    "url": "https://support.example.com"
+    "slug": "risk",
+    "name": "Modini Risk",
+    "description": "Risk management and assessment tools.",
+    "url": "https://risk.modiniapps.co.uk"
   }
 ]

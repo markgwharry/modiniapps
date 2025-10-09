@@ -28,12 +28,18 @@ async function authenticateUser(email, password) {
     error.code = 'INVALID_CREDENTIALS';
     throw error;
   }
-  return { id: user.id, email: user.email, createdAt: user.createdAt };
+  // Check if user is approved (admins are always approved)
+  if (!user.isAdmin && !user.approved) {
+    const error = new Error('Account pending approval');
+    error.code = 'PENDING_APPROVAL';
+    throw error;
+  }
+  return { id: user.id, email: user.email, isAdmin: user.isAdmin, approved: user.approved, createdAt: user.createdAt };
 }
 
 function sanitizeUser(user) {
   if (!user) return null;
-  return { id: user.id, email: user.email, createdAt: user.createdAt };
+  return { id: user.id, email: user.email, isAdmin: user.isAdmin, approved: user.approved, createdAt: user.createdAt };
 }
 
 module.exports = {

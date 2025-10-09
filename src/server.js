@@ -8,12 +8,18 @@ const cors = require('cors');
 
 const { loadApps } = require('./config');
 const requireAuth = require('./middleware/requireAuth');
+const requireAdmin = require('./middleware/requireAdmin');
 const {
   registerUser,
   authenticateUser,
   sanitizeUser,
   findUserById,
 } = require('./services/authService');
+const {
+  updateUserAdmin,
+  updateUserApproval,
+  getAllUsers,
+} = require('./db');
 const {
   PORT,
   SESSION_SECRET,
@@ -26,6 +32,49 @@ const {
 
 const apps = loadApps();
 const app = express();
+
+// Trust proxy - we're behind Traefik
+app.set('trust proxy', 1);
+
+// Seed admin user on startup
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'mark.wharry@modini.co.uk';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'kulsedcew1!';
+
+async function seedAdmin() {
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+    console.warn('Admin email or password not set in environment. Skipping admin seeding.');
+    return;
+  }
+
+  try {
+    const bcrypt = require('bcrypt');
+    const { findUserByEmail, createUser } = require('./db');
+
+    const normalisedEmail = ADMIN_EMAIL.trim().toLowerCase();
+    const existingAdmin = await findUserByEmail(normalisedEmail);
+
+    if (!existingAdmin) {
+      const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+      await createUser(normalisedEmail, passwordHash, true, true);
+      console.log(`✓ Admin user seeded: ${normalisedEmail}`);
+    } else {
+      // Ensure existing admin is marked as admin and approved
+      if (!existingAdmin.isAdmin || !existingAdmin.approved) {
+        await updateUserAdmin(existingAdmin.id, true);
+        await updateUserApproval(existingAdmin.id, true);
+        console.log(`✓ Existing admin user updated: ${normalisedEmail}`);
+      } else {
+        console.log(`Admin user already exists: ${normalisedEmail}`);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to seed admin user', error);
+  }
+}
+
+seedAdmin().catch((err) => {
+  console.error('Failed to seed admin user', err);
+});
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
@@ -70,14 +119,18 @@ app.use(
     }),
     secret: SESSION_SECRET,
     name: SESSION_NAME,
-    resave: false,
+    resave: true,  // Changed to true to ensure session is saved on every request
     saveUninitialized: false,
     cookie: cookieConfig,
+    rolling: true,  // Reset cookie maxAge on every request
   })
 );
 
 app.use(async (req, res, next) => {
   res.locals.currentUser = null;
+  if (req.session) {
+    console.log('Session middleware - ID:', req.session.id, 'userId:', req.session.userId);
+  }
   if (req.session && req.session.userId) {
     try {
       const user = await findUserById(req.session.userId);
@@ -94,6 +147,7 @@ app.use(async (req, res, next) => {
 });
 
 app.get('/', (req, res) => {
+  console.log('GET / - session exists:', !!req.session, 'userId:', req.session?.userId);
   if (!req.session || !req.session.userId) {
     return res.render('login', { error: null, redirect: req.query.redirect || null });
   }
@@ -131,7 +185,18 @@ app.post('/auth/register', async (req, res) => {
   try {
     const user = await registerUser(email, password);
     req.session.userId = user.id;
-    return res.redirect(redirect || '/');
+    
+    // Save session before redirect
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.status(500).render('register', {
+          error: 'Registration successful but login failed. Please try logging in.',
+          redirect: redirect || null,
+        });
+      }
+      return res.redirect(redirect || '/');
+    });
   } catch (error) {
     const message = error.code === 'USER_EXISTS' ? 'That email is already registered' : 'Failed to create account';
     console.error('Register error', error);
@@ -144,6 +209,7 @@ app.post('/auth/register', async (req, res) => {
 
 app.post('/auth/login', async (req, res) => {
   const { email, password, redirect } = req.body;
+  console.log('Login attempt for:', email);
   if (!email || !password) {
     return res.status(400).render('login', {
       error: 'Email and password are required',
@@ -152,10 +218,28 @@ app.post('/auth/login', async (req, res) => {
   }
   try {
     const user = await authenticateUser(email, password);
+    console.log('Auth successful, setting session for user ID:', user.id);
     req.session.userId = user.id;
-    return res.redirect(redirect || '/');
+    
+    // Save session before redirect
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.status(500).render('login', {
+          error: 'Login failed. Please try again.',
+          redirect: redirect || null,
+        });
+      }
+      console.log('Session saved, redirecting');
+      return res.redirect(redirect || '/');
+    });
   } catch (error) {
-    const message = error.code === 'INVALID_CREDENTIALS' ? 'Invalid email or password' : 'Unable to log in';
+    let message = 'Unable to log in';
+    if (error.code === 'INVALID_CREDENTIALS') {
+      message = 'Invalid email or password';
+    } else if (error.code === 'PENDING_APPROVAL') {
+      message = 'Account pending approval';
+    }
     console.error('Login error', error);
     return res.status(401).render('login', {
       error: message,
@@ -199,6 +283,57 @@ app.get('/api/auth/session', (req, res) => {
   }
   const user = sanitizeUser(req.user);
   return res.json({ authenticated: true, user });
+});
+
+// Admin routes
+app.get('/admin', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await getAllUsers();
+    return res.render('admin', { users });
+  } catch (error) {
+    console.error('Failed to load users', error);
+    return res.status(500).render('error', { message: 'Failed to load admin panel' });
+  }
+});
+
+app.post('/admin/users/:id/approve', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await updateUserApproval(req.params.id, true);
+    return res.redirect('/admin');
+  } catch (error) {
+    console.error('Failed to approve user', error);
+    return res.status(500).render('error', { message: 'Failed to approve user' });
+  }
+});
+
+app.post('/admin/users/:id/unapprove', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await updateUserApproval(req.params.id, false);
+    return res.redirect('/admin');
+  } catch (error) {
+    console.error('Failed to unapprove user', error);
+    return res.status(500).render('error', { message: 'Failed to unapprove user' });
+  }
+});
+
+app.post('/admin/users/:id/make-admin', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await updateUserAdmin(req.params.id, true);
+    return res.redirect('/admin');
+  } catch (error) {
+    console.error('Failed to make user admin', error);
+    return res.status(500).render('error', { message: 'Failed to make user admin' });
+  }
+});
+
+app.post('/admin/users/:id/remove-admin', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await updateUserAdmin(req.params.id, false);
+    return res.redirect('/admin');
+  } catch (error) {
+    console.error('Failed to remove admin', error);
+    return res.status(500).render('error', { message: 'Failed to remove admin' });
+  }
 });
 
 app.use((err, req, res, next) => {

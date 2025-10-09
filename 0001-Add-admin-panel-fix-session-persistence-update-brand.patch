@@ -1,0 +1,653 @@
+From 08792ed5014b888f38b919b734d1edecab6e7809 Mon Sep 17 00:00:00 2001
+From: vpsadmin <ops@modiniapps.co.uk>
+Date: Thu, 9 Oct 2025 10:32:30 +0000
+Subject: [PATCH] Add admin panel, fix session persistence, update branding to
+ Flight Operations
+
+---
+ .github/workflows/deploy.yml   |  18 +----
+ Dockerfile                     |  15 ++++
+ src/config/apps.json           |  24 +++---
+ src/db.js                      |  53 ++++++++++--
+ src/middleware/requireAdmin.js |  12 +++
+ src/server.js                  | 143 ++++++++++++++++++++++++++++++++-
+ src/services/authService.js    |  10 ++-
+ views/admin.ejs                | 128 +++++++++++++++++++++++++++++
+ views/dashboard.ejs            |   5 +-
+ views/login.ejs                |   2 +-
+ views/register.ejs             |   4 +-
+ 11 files changed, 372 insertions(+), 42 deletions(-)
+ create mode 100644 Dockerfile
+ create mode 100644 src/middleware/requireAdmin.js
+ create mode 100644 views/admin.ejs
+
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 2581ef2..0f5f229 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -18,20 +18,10 @@ jobs:
+         with:
+           fetch-depth: 0
+ 
+-      - name: Add SSH key for server deploy
+-        uses: webfactory/ssh-agent@v0.9.0
+-        with:
+-          ssh-private-key: |
+-            ${{ secrets.SSH_PRIVATE_KEY_AUTH }}
+-
+-      - name: Trust server host
++      - name: Setup SSH and deploy
+         run: |
+           mkdir -p ~/.ssh
++          echo "${{ secrets.SSH_PRIVATE_KEY_AUTH }}" > ~/.ssh/id_rsa
++          chmod 600 ~/.ssh/id_rsa
+           ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+-
+-      - name: Trigger deploy script on server
+-        env:
+-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+-          DEPLOY_USER: vpsadmin
+-        run: |
+-          ssh -o IdentitiesOnly=yes ${DEPLOY_USER}@${DEPLOY_HOST}
++          ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa vpsadmin@${{ secrets.DEPLOY_HOST }} "/home/vpsadmin/work/apps/auth/ops/deploy_wrapper.sh"
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..93e7832
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,15 @@
++FROM node:20-alpine
++
++WORKDIR /app
++
++COPY package*.json ./
++RUN npm ci --only=production
++
++COPY . .
++
++RUN mkdir -p data && chown -R node:node /app
++
++USER node
++
++EXPOSE 3000
++CMD ["node", "src/server.js"]
+diff --git a/src/config/apps.json b/src/config/apps.json
+index c1952f9..ef53cf9 100644
+--- a/src/config/apps.json
++++ b/src/config/apps.json
+@@ -1,20 +1,20 @@
+ [
+   {
+-    "slug": "analytics",
+-    "name": "Analytics Dashboard",
+-    "description": "Business intelligence dashboards and reporting.",
+-    "url": "https://analytics.example.com"
++    "slug": "dart",
++    "name": "DART 250",
++    "description": "Flight Termination Explorer - aviation safety and compliance analysis.",
++    "url": "https://dart.modiniapps.co.uk"
+   },
+   {
+-    "slug": "crm",
+-    "name": "Customer CRM",
+-    "description": "Manage customer relationships and sales pipelines.",
+-    "url": "https://crm.example.com"
++    "slug": "skylens",
++    "name": "Skylens",
++    "description": "Engineering and operations monitoring and analytics.",
++    "url": "https://skylens.modiniapps.co.uk"
+   },
+   {
+-    "slug": "support",
+-    "name": "Support Suite",
+-    "description": "Ticketing and customer support tooling.",
+-    "url": "https://support.example.com"
++    "slug": "risk",
++    "name": "Modini Risk",
++    "description": "Risk management and assessment tools.",
++    "url": "https://risk.modiniapps.co.uk"
+   }
+ ]
+diff --git a/src/db.js b/src/db.js
+index cd93aba..9bd70a1 100644
+--- a/src/db.js
++++ b/src/db.js
+@@ -14,26 +14,28 @@ db.serialize(() => {
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       email TEXT NOT NULL UNIQUE,
+       password_hash TEXT NOT NULL,
++      is_admin INTEGER DEFAULT 0,
++      approved INTEGER DEFAULT 0,
+       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+     )`
+   );
+ });
+ 
+-function createUser(email, passwordHash) {
++function createUser(email, passwordHash, isAdmin = false, approved = false) {
+   return new Promise((resolve, reject) => {
+-    const stmt = `INSERT INTO users (email, password_hash) VALUES (?, ?)`;
+-    db.run(stmt, [email, passwordHash], function (err) {
++    const stmt = `INSERT INTO users (email, password_hash, is_admin, approved) VALUES (?, ?, ?, ?)`;
++    db.run(stmt, [email, passwordHash, isAdmin ? 1 : 0, approved ? 1 : 0], function (err) {
+       if (err) {
+         return reject(err);
+       }
+-      resolve({ id: this.lastID, email });
++      resolve({ id: this.lastID, email, isAdmin, approved });
+     });
+   });
+ }
+ 
+ function findUserByEmail(email) {
+   return new Promise((resolve, reject) => {
+-    const stmt = `SELECT id, email, password_hash as passwordHash, created_at as createdAt FROM users WHERE email = ?`;
++    const stmt = `SELECT id, email, password_hash as passwordHash, is_admin as isAdmin, approved, created_at as createdAt FROM users WHERE email = ?`;
+     db.get(stmt, [email], (err, row) => {
+       if (err) {
+         return reject(err);
+@@ -45,7 +47,7 @@ function findUserByEmail(email) {
+ 
+ function findUserById(id) {
+   return new Promise((resolve, reject) => {
+-    const stmt = `SELECT id, email, created_at as createdAt FROM users WHERE id = ?`;
++    const stmt = `SELECT id, email, is_admin as isAdmin, approved, created_at as createdAt FROM users WHERE id = ?`;
+     db.get(stmt, [id], (err, row) => {
+       if (err) {
+         return reject(err);
+@@ -55,8 +57,47 @@ function findUserById(id) {
+   });
+ }
+ 
++function updateUserAdmin(id, isAdmin) {
++  return new Promise((resolve, reject) => {
++    const stmt = `UPDATE users SET is_admin = ? WHERE id = ?`;
++    db.run(stmt, [isAdmin ? 1 : 0, id], function (err) {
++      if (err) {
++        return reject(err);
++      }
++      resolve({ id, isAdmin });
++    });
++  });
++}
++
++function updateUserApproval(id, approved) {
++  return new Promise((resolve, reject) => {
++    const stmt = `UPDATE users SET approved = ? WHERE id = ?`;
++    db.run(stmt, [approved ? 1 : 0, id], function (err) {
++      if (err) {
++        return reject(err);
++      }
++      resolve({ id, approved });
++    });
++  });
++}
++
++function getAllUsers() {
++  return new Promise((resolve, reject) => {
++    const stmt = `SELECT id, email, is_admin as isAdmin, approved, created_at as createdAt FROM users ORDER BY created_at DESC`;
++    db.all(stmt, [], (err, rows) => {
++      if (err) {
++        return reject(err);
++      }
++      resolve(rows);
++    });
++  });
++}
++
+ module.exports = {
+   createUser,
+   findUserByEmail,
+   findUserById,
++  updateUserAdmin,
++  updateUserApproval,
++  getAllUsers,
+ };
+diff --git a/src/middleware/requireAdmin.js b/src/middleware/requireAdmin.js
+new file mode 100644
+index 0000000..92acf59
+--- /dev/null
++++ b/src/middleware/requireAdmin.js
+@@ -0,0 +1,12 @@
++function requireAdmin(req, res, next) {
++  if (!req.user || !req.user.isAdmin) {
++    if (req.accepts('json')) {
++      return res.status(403).json({ error: 'Admin access required' });
++    }
++    return res.status(403).render('error', { message: 'Admin access required' });
++  }
++  next();
++}
++
++module.exports = requireAdmin;
++
+diff --git a/src/server.js b/src/server.js
+index 8177d4c..2e5ffb6 100644
+--- a/src/server.js
++++ b/src/server.js
+@@ -8,12 +8,18 @@ const cors = require('cors');
+ 
+ const { loadApps } = require('./config');
+ const requireAuth = require('./middleware/requireAuth');
++const requireAdmin = require('./middleware/requireAdmin');
+ const {
+   registerUser,
+   authenticateUser,
+   sanitizeUser,
+   findUserById,
+ } = require('./services/authService');
++const {
++  updateUserAdmin,
++  updateUserApproval,
++  getAllUsers,
++} = require('./db');
+ const {
+   PORT,
+   SESSION_SECRET,
+@@ -27,6 +33,49 @@ const {
+ const apps = loadApps();
+ const app = express();
+ 
++// Trust proxy - we're behind Traefik
++app.set('trust proxy', 1);
++
++// Seed admin user on startup
++const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'mark.wharry@modini.co.uk';
++const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'kulsedcew1!';
++
++async function seedAdmin() {
++  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
++    console.warn('Admin email or password not set in environment. Skipping admin seeding.');
++    return;
++  }
++
++  try {
++    const bcrypt = require('bcrypt');
++    const { findUserByEmail, createUser } = require('./db');
++
++    const normalisedEmail = ADMIN_EMAIL.trim().toLowerCase();
++    const existingAdmin = await findUserByEmail(normalisedEmail);
++
++    if (!existingAdmin) {
++      const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
++      await createUser(normalisedEmail, passwordHash, true, true);
++      console.log(`✓ Admin user seeded: ${normalisedEmail}`);
++    } else {
++      // Ensure existing admin is marked as admin and approved
++      if (!existingAdmin.isAdmin || !existingAdmin.approved) {
++        await updateUserAdmin(existingAdmin.id, true);
++        await updateUserApproval(existingAdmin.id, true);
++        console.log(`✓ Existing admin user updated: ${normalisedEmail}`);
++      } else {
++        console.log(`Admin user already exists: ${normalisedEmail}`);
++      }
++    }
++  } catch (error) {
++    console.error('Failed to seed admin user', error);
++  }
++}
++
++seedAdmin().catch((err) => {
++  console.error('Failed to seed admin user', err);
++});
++
+ app.set('view engine', 'ejs');
+ app.set('views', path.join(__dirname, '..', 'views'));
+ 
+@@ -70,14 +119,18 @@ app.use(
+     }),
+     secret: SESSION_SECRET,
+     name: SESSION_NAME,
+-    resave: false,
++    resave: true,  // Changed to true to ensure session is saved on every request
+     saveUninitialized: false,
+     cookie: cookieConfig,
++    rolling: true,  // Reset cookie maxAge on every request
+   })
+ );
+ 
+ app.use(async (req, res, next) => {
+   res.locals.currentUser = null;
++  if (req.session) {
++    console.log('Session middleware - ID:', req.session.id, 'userId:', req.session.userId);
++  }
+   if (req.session && req.session.userId) {
+     try {
+       const user = await findUserById(req.session.userId);
+@@ -94,6 +147,7 @@ app.use(async (req, res, next) => {
+ });
+ 
+ app.get('/', (req, res) => {
++  console.log('GET / - session exists:', !!req.session, 'userId:', req.session?.userId);
+   if (!req.session || !req.session.userId) {
+     return res.render('login', { error: null, redirect: req.query.redirect || null });
+   }
+@@ -131,7 +185,18 @@ app.post('/auth/register', async (req, res) => {
+   try {
+     const user = await registerUser(email, password);
+     req.session.userId = user.id;
+-    return res.redirect(redirect || '/');
++    
++    // Save session before redirect
++    req.session.save((err) => {
++      if (err) {
++        console.error('Session save error:', err);
++        return res.status(500).render('register', {
++          error: 'Registration successful but login failed. Please try logging in.',
++          redirect: redirect || null,
++        });
++      }
++      return res.redirect(redirect || '/');
++    });
+   } catch (error) {
+     const message = error.code === 'USER_EXISTS' ? 'That email is already registered' : 'Failed to create account';
+     console.error('Register error', error);
+@@ -144,6 +209,7 @@ app.post('/auth/register', async (req, res) => {
+ 
+ app.post('/auth/login', async (req, res) => {
+   const { email, password, redirect } = req.body;
++  console.log('Login attempt for:', email);
+   if (!email || !password) {
+     return res.status(400).render('login', {
+       error: 'Email and password are required',
+@@ -152,10 +218,28 @@ app.post('/auth/login', async (req, res) => {
+   }
+   try {
+     const user = await authenticateUser(email, password);
++    console.log('Auth successful, setting session for user ID:', user.id);
+     req.session.userId = user.id;
+-    return res.redirect(redirect || '/');
++    
++    // Save session before redirect
++    req.session.save((err) => {
++      if (err) {
++        console.error('Session save error:', err);
++        return res.status(500).render('login', {
++          error: 'Login failed. Please try again.',
++          redirect: redirect || null,
++        });
++      }
++      console.log('Session saved, redirecting');
++      return res.redirect(redirect || '/');
++    });
+   } catch (error) {
+-    const message = error.code === 'INVALID_CREDENTIALS' ? 'Invalid email or password' : 'Unable to log in';
++    let message = 'Unable to log in';
++    if (error.code === 'INVALID_CREDENTIALS') {
++      message = 'Invalid email or password';
++    } else if (error.code === 'PENDING_APPROVAL') {
++      message = 'Account pending approval';
++    }
+     console.error('Login error', error);
+     return res.status(401).render('login', {
+       error: message,
+@@ -201,6 +285,57 @@ app.get('/api/auth/session', (req, res) => {
+   return res.json({ authenticated: true, user });
+ });
+ 
++// Admin routes
++app.get('/admin', requireAuth, requireAdmin, async (req, res) => {
++  try {
++    const users = await getAllUsers();
++    return res.render('admin', { users });
++  } catch (error) {
++    console.error('Failed to load users', error);
++    return res.status(500).render('error', { message: 'Failed to load admin panel' });
++  }
++});
++
++app.post('/admin/users/:id/approve', requireAuth, requireAdmin, async (req, res) => {
++  try {
++    await updateUserApproval(req.params.id, true);
++    return res.redirect('/admin');
++  } catch (error) {
++    console.error('Failed to approve user', error);
++    return res.status(500).render('error', { message: 'Failed to approve user' });
++  }
++});
++
++app.post('/admin/users/:id/unapprove', requireAuth, requireAdmin, async (req, res) => {
++  try {
++    await updateUserApproval(req.params.id, false);
++    return res.redirect('/admin');
++  } catch (error) {
++    console.error('Failed to unapprove user', error);
++    return res.status(500).render('error', { message: 'Failed to unapprove user' });
++  }
++});
++
++app.post('/admin/users/:id/make-admin', requireAuth, requireAdmin, async (req, res) => {
++  try {
++    await updateUserAdmin(req.params.id, true);
++    return res.redirect('/admin');
++  } catch (error) {
++    console.error('Failed to make user admin', error);
++    return res.status(500).render('error', { message: 'Failed to make user admin' });
++  }
++});
++
++app.post('/admin/users/:id/remove-admin', requireAuth, requireAdmin, async (req, res) => {
++  try {
++    await updateUserAdmin(req.params.id, false);
++    return res.redirect('/admin');
++  } catch (error) {
++    console.error('Failed to remove admin', error);
++    return res.status(500).render('error', { message: 'Failed to remove admin' });
++  }
++});
++
+ app.use((err, req, res, next) => {
+   console.error('Unhandled error', err);
+   if (req.accepts('json')) {
+diff --git a/src/services/authService.js b/src/services/authService.js
+index da66b02..99b36a4 100644
+--- a/src/services/authService.js
++++ b/src/services/authService.js
+@@ -28,12 +28,18 @@ async function authenticateUser(email, password) {
+     error.code = 'INVALID_CREDENTIALS';
+     throw error;
+   }
+-  return { id: user.id, email: user.email, createdAt: user.createdAt };
++  // Check if user is approved (admins are always approved)
++  if (!user.isAdmin && !user.approved) {
++    const error = new Error('Account pending approval');
++    error.code = 'PENDING_APPROVAL';
++    throw error;
++  }
++  return { id: user.id, email: user.email, isAdmin: user.isAdmin, approved: user.approved, createdAt: user.createdAt };
+ }
+ 
+ function sanitizeUser(user) {
+   if (!user) return null;
+-  return { id: user.id, email: user.email, createdAt: user.createdAt };
++  return { id: user.id, email: user.email, isAdmin: user.isAdmin, approved: user.approved, createdAt: user.createdAt };
+ }
+ 
+ module.exports = {
+diff --git a/views/admin.ejs b/views/admin.ejs
+new file mode 100644
+index 0000000..5993e80
+--- /dev/null
++++ b/views/admin.ejs
+@@ -0,0 +1,128 @@
++<!DOCTYPE html>
++<html lang="en">
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>Admin Panel · Modini Apps</title>
++    <link rel="stylesheet" href="/css/styles.css" />
++    <style>
++      .admin-table {
++        width: 100%;
++        border-collapse: collapse;
++        margin: 2rem 0;
++      }
++      .admin-table th,
++      .admin-table td {
++        padding: 1rem;
++        text-align: left;
++        border-bottom: 1px solid #ddd;
++      }
++      .admin-table th {
++        background-color: #f4f4f4;
++        font-weight: bold;
++      }
++      .admin-table .actions {
++        display: flex;
++        gap: 0.5rem;
++      }
++      .admin-table button {
++        padding: 0.5rem 1rem;
++        font-size: 0.875rem;
++        cursor: pointer;
++      }
++      .admin-table .status-badge {
++        padding: 0.25rem 0.5rem;
++        border-radius: 4px;
++        font-size: 0.75rem;
++        font-weight: bold;
++      }
++      .admin-table .status-badge.approved {
++        background-color: #d4edda;
++        color: #155724;
++      }
++      .admin-table .status-badge.pending {
++        background-color: #fff3cd;
++        color: #856404;
++      }
++      .admin-table .status-badge.admin {
++        background-color: #d1ecf1;
++        color: #0c5460;
++      }
++    </style>
++  </head>
++  <body>
++    <div class="container">
++      <div class="content-wrapper">
++        <div class="header">
++          <h1>Admin Panel</h1>
++          <p>Manage user accounts and permissions</p>
++          <a href="/" class="button secondary">← Back to Dashboard</a>
++        </div>
++
++        <% if (users.length === 0) { %>
++          <p>No users found.</p>
++        <% } else { %>
++          <table class="admin-table">
++            <thead>
++              <tr>
++                <th>ID</th>
++                <th>Email</th>
++                <th>Status</th>
++                <th>Role</th>
++                <th>Created</th>
++                <th>Actions</th>
++              </tr>
++            </thead>
++            <tbody>
++              <% users.forEach(user => { %>
++                <tr>
++                  <td><%= user.id %></td>
++                  <td><%= user.email %></td>
++                  <td>
++                    <% if (user.approved) { %>
++                      <span class="status-badge approved">Approved</span>
++                    <% } else { %>
++                      <span class="status-badge pending">Pending</span>
++                    <% } %>
++                  </td>
++                  <td>
++                    <% if (user.isAdmin) { %>
++                      <span class="status-badge admin">Admin</span>
++                    <% } else { %>
++                      User
++                    <% } %>
++                  </td>
++                  <td><%= new Date(user.createdAt).toLocaleDateString() %></td>
++                  <td>
++                    <div class="actions">
++                      <% if (!user.approved) { %>
++                        <form method="POST" action="/admin/users/<%= user.id %>/approve" style="display: inline;">
++                          <button type="submit" class="button">Approve</button>
++                        </form>
++                      <% } else { %>
++                        <form method="POST" action="/admin/users/<%= user.id %>/unapprove" style="display: inline;">
++                          <button type="submit" class="button secondary">Unapprove</button>
++                        </form>
++                      <% } %>
++                      
++                      <% if (!user.isAdmin) { %>
++                        <form method="POST" action="/admin/users/<%= user.id %>/make-admin" style="display: inline;">
++                          <button type="submit" class="button">Make Admin</button>
++                        </form>
++                      <% } else if (user.id !== currentUser.id) { %>
++                        <form method="POST" action="/admin/users/<%= user.id %>/remove-admin" style="display: inline;">
++                          <button type="submit" class="button secondary">Remove Admin</button>
++                        </form>
++                      <% } %>
++                    </div>
++                  </td>
++                </tr>
++              <% }); %>
++            </tbody>
++          </table>
++        <% } %>
++      </div>
++    </div>
++  </body>
++</html>
++
+diff --git a/views/dashboard.ejs b/views/dashboard.ejs
+index 6e15393..390786c 100644
+--- a/views/dashboard.ejs
++++ b/views/dashboard.ejs
+@@ -13,12 +13,15 @@
+           <div class="brand">
+             <img src="/img/modiniLogo.png" alt="Modini" />
+             <div class="brand-copy">
+-              <span class="eyebrow">Mission control</span>
++              <span class="eyebrow">Flight Operations Applications</span>
+               <h1>Welcome back<% if (currentUser) { %>, <%= currentUser.email %><% } %>!</h1>
+               <p>Select one of the applications below to open it in a new tab.</p>
+             </div>
+           </div>
+           <div class="actions">
++            <% if (currentUser && currentUser.isAdmin) { %>
++              <a href="/admin" class="button secondary">Admin Panel</a>
++            <% } %>
+             <button class="theme-toggle" type="button" data-theme-toggle>Toggle theme</button>
+             <form method="POST" action="/auth/logout">
+               <button class="secondary" type="submit">Sign out</button>
+diff --git a/views/login.ejs b/views/login.ejs
+index d71d8d0..444bc2c 100644
+--- a/views/login.ejs
++++ b/views/login.ejs
+@@ -13,7 +13,7 @@
+           <div class="brand">
+             <img src="/img/modiniLogo.png" alt="Modini" />
+             <div class="brand-copy">
+-              <span class="eyebrow">Secure Control Tower</span>
++              <span class="eyebrow">Flight Operations Applications</span>
+               <h1>Modini Apps Access</h1>
+               <p>Authenticate to reach your workspace applications.</p>
+             </div>
+diff --git a/views/register.ejs b/views/register.ejs
+index bf57795..5e89f70 100644
+--- a/views/register.ejs
++++ b/views/register.ejs
+@@ -13,9 +13,9 @@
+           <div class="brand">
+             <img src="/img/modiniLogo.png" alt="Modini" />
+             <div class="brand-copy">
+-              <span class="eyebrow">Join the platform</span>
++              <span class="eyebrow">Flight Operations Applications</span>
+               <h1>Create your Modini Apps login</h1>
+-              <p>One identity to reach every application on the VPS.</p>
++              <p>One identity to reach every application on the platform.</p>
+             </div>
+           </div>
+           <div class="actions">
+-- 
+2.43.0
+
