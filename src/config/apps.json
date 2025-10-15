@@ -16,5 +16,11 @@
     "name": "Modini Risk",
     "description": "Risk management and assessment tools.",
     "url": "https://risk.modiniapps.co.uk"
+  },
+  {
+    "slug": "docman",
+    "name": "DocMan",
+    "description": "Document control and lifecycle management.",
+    "url": "https://docman.modiniapps.co.uk"
   }
 ]
