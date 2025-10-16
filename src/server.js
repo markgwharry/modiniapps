@@ -282,6 +282,14 @@ app.get('/api/auth/session', (req, res) => {
     return res.status(401).json({ authenticated: false });
   }
   const user = sanitizeUser(req.user);
+  if (user) {
+    try {
+      const encodedUser = Buffer.from(JSON.stringify(user), 'utf8').toString('base64url');
+      res.set('X-Forwarded-User', encodedUser);
+    } catch (error) {
+      console.error('Failed to encode forwarded user payload', error);
+    }
+  }
   return res.json({ authenticated: true, user });
 });
 
