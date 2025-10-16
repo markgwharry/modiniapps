@@ -248,21 +248,38 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
-app.post('/auth/logout', (req, res, next) => {
-  if (!req.session) {
-    return res.redirect('/');
+function handleLogout(req, res, next, redirectTarget) {
+  const redirectTo = redirectTarget || '/';
+  const clearOptions = {};
+  if (COOKIE_DOMAIN) {
+    clearOptions.domain = COOKIE_DOMAIN;
   }
+
+  const finish = () => {
+    res.clearCookie(SESSION_NAME, clearOptions);
+    return res.redirect(redirectTo);
+  };
+
+  if (!req.session) {
+    return finish();
+  }
+
   req.session.destroy((err) => {
     if (err) {
       return next(err);
     }
-    const clearOptions = {};
-    if (COOKIE_DOMAIN) {
-      clearOptions.domain = COOKIE_DOMAIN;
-    }
-    res.clearCookie(SESSION_NAME, clearOptions);
-    return res.redirect('/');
+    finish();
   });
+}
+
+app.post('/auth/logout', (req, res, next) => {
+  const redirectTo = req.body?.redirect;
+  handleLogout(req, res, next, redirectTo);
+});
+
+app.get('/auth/logout', (req, res, next) => {
+  const redirectTo = req.query.redirect;
+  handleLogout(req, res, next, redirectTo);
 });
 
 app.get('/apps/:slug', requireAuth, (req, res) => {
