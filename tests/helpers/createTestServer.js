@@ -15,7 +15,7 @@ function createTestServer() {
   process.env.CORS_ALLOW_ORIGINS = '';
   process.env.PORT = '0';
 
-  const app = require('../../src/server');
+  const { app } = require('../../src/server');
   const db = require('../../src/db');
 
   return { app, db, tempDir };
