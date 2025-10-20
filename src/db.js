@@ -119,6 +119,18 @@ function updateUserApproval(id, approved) {
   });
 }
 
+function updateUserPassword(id, passwordHash) {
+  return new Promise((resolve, reject) => {
+    const stmt = `UPDATE users SET password_hash = ? WHERE id = ?`;
+    db.run(stmt, [passwordHash, id], function (err) {
+      if (err) {
+        return reject(err);
+      }
+      resolve({ id });
+    });
+  });
+}
+
 function getAllUsers() {
   return new Promise((resolve, reject) => {
     const stmt = `SELECT id, email, full_name as fullName, job_title as jobTitle, phone, is_admin as isAdmin, approved, created_at as createdAt FROM users ORDER BY created_at DESC`;
@@ -131,6 +143,9 @@ function getAllUsers() {
   });
 }
 
+function closeDatabase() {
+  return new Promise((resolve, reject) => {
+    db.close((err) => {
 function getPendingUsers() {
   return new Promise((resolve, reject) => {
     const stmt = `SELECT id, email, full_name as fullName, job_title as jobTitle, phone, created_at as createdAt FROM users WHERE approved = 0 ORDER BY created_at ASC`;
@@ -198,10 +213,7 @@ module.exports = {
   findUserByIdWithPassword,
   updateUserAdmin,
   updateUserApproval,
-  getAllUsers,
-  getPendingUsers,
-  updateUserProfile,
   updateUserPassword,
-  deleteUser,
-  clearUsers,
+  getAllUsers,
+  closeDatabase,
 };

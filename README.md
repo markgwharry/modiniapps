@@ -59,6 +59,25 @@ The repo intentionally contains **all logic related to authentication and multi-
 
 4. Create a user via the UI (`/register`) and sign in. Once authenticated you will see the dashboard with the configured app links.
 
+## Email notifications
+
+New user registrations are held in a pending state until an administrator approves them. When a registration is submitted the gateway sends two emails: one to the configured administrator inbox requesting approval and another to the registrant confirming that their account is awaiting review. When an administrator approves the account the system generates a temporary password, stores the hash and emails the credentials to the registrant with instructions to change it after signing in.
+
+Configure SMTP credentials in `.env` so these notifications can be delivered:
+
+```
+MAIL_HOST=smtp.example.com
+MAIL_PORT=587
+MAIL_SECURE=false
+MAIL_USER=your-smtp-username
+MAIL_PASSWORD=your-smtp-password
+MAIL_FROM="Modini Apps <no-reply@example.com>"
+MAIL_ADMIN_RECIPIENTS=approvals@example.com
+PUBLIC_BASE_URL=https://apps.example.com
+```
+
+`MAIL_ADMIN_RECIPIENTS` accepts a comma-separated list of addresses. `PUBLIC_BASE_URL` is optional but recommended so links in the emails point back to the correct environment.
+
 ## Configuring apps
 
 The launcher reads from [`src/config/apps.json`](src/config/apps.json). Each entry must define a `slug`, `name`, `description` and the absolute `url` of the downstream app. Editing this file changes what appears on the dashboard and which destinations the `/apps/:slug` redirector targets.

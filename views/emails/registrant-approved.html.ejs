@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <p>Hello <%= user.email %>,</p>
+    <p>Your Modini Apps account has been approved.</p>
+    <p>
+      A temporary password has been generated for you:
+      <strong><%= temporaryPassword %></strong>
+    </p>
+    <p>Sign in using this password and change it immediately from your account settings.</p>
+    <p><a href="<%= process.env.PUBLIC_BASE_URL || '' %>/login">Sign in to Modini Apps</a></p>
+    <p>Thanks,<br />The Modini Apps team</p>
+  </body>
+</html>
