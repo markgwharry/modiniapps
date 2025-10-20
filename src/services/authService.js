@@ -1,5 +1,11 @@
 const bcrypt = require('bcrypt');
-const { createUser, findUserByEmail, findUserById } = require('../db');
+const {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  findUserByIdWithPassword,
+  updateUserPassword,
+} = require('../db');
 
 async function registerUser(email, password) {
   const normalisedEmail = email.trim().toLowerCase();
@@ -34,12 +40,53 @@ async function authenticateUser(email, password) {
     error.code = 'PENDING_APPROVAL';
     throw error;
   }
-  return { id: user.id, email: user.email, isAdmin: user.isAdmin, approved: user.approved, createdAt: user.createdAt };
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName || '',
+    jobTitle: user.jobTitle || '',
+    phone: user.phone || '',
+    isAdmin: user.isAdmin,
+    approved: user.approved,
+    createdAt: user.createdAt,
+  };
 }
 
 function sanitizeUser(user) {
   if (!user) return null;
-  return { id: user.id, email: user.email, isAdmin: user.isAdmin, approved: user.approved, createdAt: user.createdAt };
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName || '',
+    jobTitle: user.jobTitle || '',
+    phone: user.phone || '',
+    isAdmin: user.isAdmin,
+    approved: user.approved,
+    createdAt: user.createdAt,
+  };
+}
+
+async function verifyUserPassword(userId, password) {
+  const user = await findUserByIdWithPassword(userId);
+  if (!user) {
+    const error = new Error('User not found');
+    error.code = 'USER_NOT_FOUND';
+    throw error;
+  }
+  const matches = await bcrypt.compare(password, user.passwordHash);
+  if (!matches) {
+    const error = new Error('Current password invalid');
+    error.code = 'INVALID_PASSWORD';
+    throw error;
+  }
+  return sanitizeUser(user);
+}
+
+async function changeUserPassword(userId, newPassword) {
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await updateUserPassword(userId, passwordHash);
+  const user = await findUserById(userId);
+  return sanitizeUser(user);
 }
 
 module.exports = {
@@ -47,4 +94,6 @@ module.exports = {
   authenticateUser,
   sanitizeUser,
   findUserById,
+  verifyUserPassword,
+  changeUserPassword,
 };

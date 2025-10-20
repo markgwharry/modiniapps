@@ -14,11 +14,16 @@ const {
   authenticateUser,
   sanitizeUser,
   findUserById,
+  verifyUserPassword,
+  changeUserPassword,
 } = require('./services/authService');
 const {
   updateUserAdmin,
   updateUserApproval,
   getAllUsers,
+  getPendingUsers,
+  updateUserProfile,
+  deleteUser,
 } = require('./db');
 const {
   PORT,
@@ -32,6 +37,50 @@ const {
 
 const apps = loadApps();
 const app = express();
+
+function validateProfileInput(profile) {
+  const errors = [];
+  const trimmedName = (profile.fullName || '').trim();
+  const trimmedJob = (profile.jobTitle || '').trim();
+  const trimmedPhone = (profile.phone || '').trim();
+
+  if (!trimmedName) {
+    errors.push('Full name is required');
+  } else if (trimmedName.length < 2) {
+    errors.push('Full name must be at least 2 characters');
+  }
+
+  if (trimmedJob.length > 120) {
+    errors.push('Job title must be 120 characters or fewer');
+  }
+
+  if (trimmedPhone && !/^\+?[0-9 ()-]{7,20}$/.test(trimmedPhone)) {
+    errors.push('Phone number must contain only digits and basic punctuation');
+  }
+
+  return { errors, values: { fullName: trimmedName, jobTitle: trimmedJob, phone: trimmedPhone } };
+}
+
+function validatePasswordChangeInput(data) {
+  const errors = [];
+  const currentPassword = data.currentPassword || '';
+  const newPassword = data.newPassword || '';
+  const confirmPassword = data.confirmPassword || '';
+
+  if (!currentPassword) {
+    errors.push('Current password is required');
+  }
+  if (!newPassword) {
+    errors.push('New password is required');
+  } else if (newPassword.length < 8) {
+    errors.push('New password must be at least 8 characters long');
+  }
+  if (newPassword !== confirmPassword) {
+    errors.push('New password and confirmation do not match');
+  }
+
+  return { errors, currentPassword, newPassword };
+}
 
 // Trust proxy - we're behind Traefik
 app.set('trust proxy', 1);
@@ -168,6 +217,79 @@ app.get('/register', (req, res) => {
   return res.render('register', { error: null, redirect: req.query.redirect || null });
 });
 
+app.get('/profile', requireAuth, (req, res) => {
+  return res.render('profile', {
+    user: req.user,
+    errors: [],
+    success: null,
+  });
+});
+
+app.post('/profile', requireAuth, async (req, res) => {
+  const { errors, values } = validateProfileInput(req.body);
+
+  if (errors.length > 0) {
+    return res.status(400).render('profile', {
+      user: { ...req.user, ...values },
+      errors,
+      success: null,
+    });
+  }
+
+  try {
+    await updateUserProfile(req.session.userId, values);
+    const updatedUser = await findUserById(req.session.userId);
+    req.user = updatedUser;
+    res.locals.currentUser = updatedUser;
+    return res.render('profile', {
+      user: updatedUser,
+      errors: [],
+      success: 'Profile updated successfully.',
+    });
+  } catch (error) {
+    console.error('Failed to update profile', error);
+    return res.status(500).render('profile', {
+      user: { ...req.user, ...values },
+      errors: ['Failed to update profile. Please try again.'],
+      success: null,
+    });
+  }
+});
+
+app.get('/profile/password', requireAuth, (req, res) => {
+  return res.render('password', {
+    errors: [],
+    success: null,
+  });
+});
+
+app.post('/profile/password', requireAuth, async (req, res) => {
+  const { errors, currentPassword, newPassword } = validatePasswordChangeInput(req.body);
+
+  if (errors.length > 0) {
+    return res.status(400).render('password', {
+      errors,
+      success: null,
+    });
+  }
+
+  try {
+    await verifyUserPassword(req.session.userId, currentPassword);
+    await changeUserPassword(req.session.userId, newPassword);
+    return res.render('password', {
+      errors: [],
+      success: 'Password updated successfully.',
+    });
+  } catch (error) {
+    console.error('Failed to change password', error);
+    const message = error.code === 'INVALID_PASSWORD' ? 'Current password is incorrect.' : 'Failed to update password.';
+    return res.status(400).render('password', {
+      errors: [message],
+      success: null,
+    });
+  }
+});
+
 app.post('/auth/register', async (req, res) => {
   const { email, password, confirmPassword, redirect } = req.body;
   if (!email || !password) {
@@ -294,6 +416,47 @@ app.get('/api/apps', requireAuth, (req, res) => {
   res.json({ apps });
 });
 
+app.get('/api/profile', requireAuth, (req, res) => {
+  return res.json({ profile: sanitizeUser(req.user) });
+});
+
+app.put('/api/profile', requireAuth, async (req, res) => {
+  const { errors, values } = validateProfileInput(req.body || {});
+  if (errors.length > 0) {
+    return res.status(400).json({ errors });
+  }
+
+  try {
+    await updateUserProfile(req.session.userId, values);
+    const updatedUser = await findUserById(req.session.userId);
+    req.user = updatedUser;
+    res.locals.currentUser = updatedUser;
+    return res.json({ profile: sanitizeUser(updatedUser) });
+  } catch (error) {
+    console.error('Failed to update profile via API', error);
+    return res.status(500).json({ errors: ['Failed to update profile'] });
+  }
+});
+
+app.put('/api/profile/password', requireAuth, async (req, res) => {
+  const { errors, currentPassword, newPassword } = validatePasswordChangeInput(req.body || {});
+  if (errors.length > 0) {
+    return res.status(400).json({ errors });
+  }
+
+  try {
+    await verifyUserPassword(req.session.userId, currentPassword);
+    await changeUserPassword(req.session.userId, newPassword);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to update password via API', error);
+    if (error.code === 'INVALID_PASSWORD') {
+      return res.status(400).json({ errors: ['Current password is incorrect'] });
+    }
+    return res.status(500).json({ errors: ['Failed to update password'] });
+  }
+});
+
 app.get('/api/auth/session', (req, res) => {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ authenticated: false });
@@ -313,11 +476,21 @@ app.get('/api/auth/session', (req, res) => {
 // Admin routes
 app.get('/admin', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const users = await getAllUsers();
-    return res.render('admin', { users });
+    const [users, pendingUsers] = await Promise.all([getAllUsers(), getPendingUsers()]);
+    return res.render('admin', { users, pendingCount: pendingUsers.length });
   } catch (error) {
     console.error('Failed to load users', error);
     return res.status(500).render('error', { message: 'Failed to load admin panel' });
+  }
+});
+
+app.get('/admin/pending', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const pendingUsers = await getPendingUsers();
+    return res.render('admin-pending', { users: pendingUsers });
+  } catch (error) {
+    console.error('Failed to load pending users', error);
+    return res.status(500).render('error', { message: 'Failed to load pending users' });
   }
 });
 
@@ -338,6 +511,16 @@ app.post('/admin/users/:id/unapprove', requireAuth, requireAdmin, async (req, re
   } catch (error) {
     console.error('Failed to unapprove user', error);
     return res.status(500).render('error', { message: 'Failed to unapprove user' });
+  }
+});
+
+app.post('/admin/users/:id/reject', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await deleteUser(req.params.id);
+    return res.redirect('/admin/pending');
+  } catch (error) {
+    console.error('Failed to reject user', error);
+    return res.status(500).render('error', { message: 'Failed to reject user' });
   }
 });
 
@@ -370,6 +553,10 @@ app.use((err, req, res, next) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Modini Apps gateway listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Modini Apps gateway listening on port ${PORT}`);
+  });
+}
+
+module.exports = app;
