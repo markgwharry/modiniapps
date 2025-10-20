@@ -81,6 +81,18 @@ function updateUserApproval(id, approved) {
   });
 }
 
+function updateUserPassword(id, passwordHash) {
+  return new Promise((resolve, reject) => {
+    const stmt = `UPDATE users SET password_hash = ? WHERE id = ?`;
+    db.run(stmt, [passwordHash, id], function (err) {
+      if (err) {
+        return reject(err);
+      }
+      resolve({ id });
+    });
+  });
+}
+
 function getAllUsers() {
   return new Promise((resolve, reject) => {
     const stmt = `SELECT id, email, is_admin as isAdmin, approved, created_at as createdAt FROM users ORDER BY created_at DESC`;
@@ -93,11 +105,24 @@ function getAllUsers() {
   });
 }
 
+function closeDatabase() {
+  return new Promise((resolve, reject) => {
+    db.close((err) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve();
+    });
+  });
+}
+
 module.exports = {
   createUser,
   findUserByEmail,
   findUserById,
   updateUserAdmin,
   updateUserApproval,
+  updateUserPassword,
   getAllUsers,
+  closeDatabase,
 };

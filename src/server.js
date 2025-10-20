@@ -15,6 +15,8 @@ const {
   sanitizeUser,
   findUserById,
 } = require('./services/authService');
+const { sendPendingRegistrationEmails } = require('./services/mailService');
+const { approvePendingUser } = require('./services/userApprovalService');
 const {
   updateUserAdmin,
   updateUserApproval,
@@ -165,7 +167,7 @@ app.get('/register', (req, res) => {
   if (req.session && req.session.userId) {
     return res.redirect('/');
   }
-  return res.render('register', { error: null, redirect: req.query.redirect || null });
+  return res.render('register', { error: null, success: null, redirect: req.query.redirect || null });
 });
 
 app.post('/auth/register', async (req, res) => {
@@ -173,35 +175,35 @@ app.post('/auth/register', async (req, res) => {
   if (!email || !password) {
     return res.status(400).render('register', {
       error: 'Email and password are required',
+      success: null,
       redirect: redirect || null,
     });
   }
   if (password !== confirmPassword) {
     return res.status(400).render('register', {
       error: 'Passwords do not match',
+      success: null,
       redirect: redirect || null,
     });
   }
   try {
     const user = await registerUser(email, password);
-    req.session.userId = user.id;
-    
-    // Save session before redirect
-    req.session.save((err) => {
-      if (err) {
-        console.error('Session save error:', err);
-        return res.status(500).render('register', {
-          error: 'Registration successful but login failed. Please try logging in.',
-          redirect: redirect || null,
-        });
-      }
-      return res.redirect(redirect || '/');
+    try {
+      await sendPendingRegistrationEmails(user);
+    } catch (notifyError) {
+      console.error('Failed to dispatch registration emails', notifyError);
+    }
+    return res.status(200).render('register', {
+      error: null,
+      success: 'Your registration request is pending administrator approval. You will receive an email once your account is ready.',
+      redirect: redirect || null,
     });
   } catch (error) {
     const message = error.code === 'USER_EXISTS' ? 'That email is already registered' : 'Failed to create account';
     console.error('Register error', error);
     return res.status(400).render('register', {
       error: message,
+      success: null,
       redirect: redirect || null,
     });
   }
@@ -323,9 +325,12 @@ app.get('/admin', requireAuth, requireAdmin, async (req, res) => {
 
 app.post('/admin/users/:id/approve', requireAuth, requireAdmin, async (req, res) => {
   try {
-    await updateUserApproval(req.params.id, true);
+    await approvePendingUser(req.params.id);
     return res.redirect('/admin');
   } catch (error) {
+    if (error.code === 'USER_NOT_FOUND') {
+      return res.status(404).render('error', { message: 'User not found' });
+    }
     console.error('Failed to approve user', error);
     return res.status(500).render('error', { message: 'Failed to approve user' });
   }
@@ -370,6 +375,17 @@ app.use((err, req, res, next) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Modini Apps gateway listening on port ${PORT}`);
-});
+function startServer(port = PORT) {
+  return app.listen(port, () => {
+    console.log(`Modini Apps gateway listening on port ${port}`);
+  });
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  startServer,
+};
