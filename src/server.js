@@ -460,7 +460,18 @@ app.put('/api/profile/password', requireAuth, async (req, res) => {
 });
 
 app.get('/api/auth/session', (req, res) => {
+  const forwardedMethod = req.headers['x-forwarded-method'];
+  if (forwardedMethod && forwardedMethod.toUpperCase() === 'OPTIONS') {
+    return res.json({ authenticated: true });
+  }
   if (!req.session || !req.session.userId) {
+    console.warn('Forward auth request without session cookie', {
+      cookies: req.headers.cookie,
+      path: req.path,
+      method: req.method,
+      forwardedMethod,
+      origin: req.headers.origin,
+    });
     return res.status(401).json({ authenticated: false });
   }
   const user = sanitizeUser(req.user);
