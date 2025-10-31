@@ -1,9 +1,9 @@
 const bcrypt = require('bcrypt');
-const { findUserById, updateUserApproval, updateUserPassword } = require('../db');
+const { findUserById, updateUserApproval, updateUserPassword, setUserApps } = require('../db');
 const { generateTemporaryPassword } = require('../utils/password');
 const { sendUserApprovalEmail } = require('./mailService');
 
-async function approvePendingUser(userId) {
+async function approvePendingUser(userId, allowedApps = []) {
   const user = await findUserById(userId);
   if (!user) {
     const error = new Error('User not found');
@@ -15,7 +15,8 @@ async function approvePendingUser(userId) {
   const passwordHash = await bcrypt.hash(temporaryPassword, 12);
   await updateUserPassword(userId, passwordHash);
   await updateUserApproval(userId, true);
-  const approvedUser = { ...user, approved: true };
+  await setUserApps(userId, Array.isArray(allowedApps) ? allowedApps : []);
+  const approvedUser = await findUserById(userId);
   await sendUserApprovalEmail(approvedUser, temporaryPassword);
   return { user: approvedUser, temporaryPassword };
 }

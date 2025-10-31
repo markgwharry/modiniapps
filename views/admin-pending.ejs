@@ -32,6 +32,22 @@
         border-radius: 8px;
         text-align: center;
       }
+      .app-access-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .app-access-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.35rem 0.75rem;
+      }
+      .app-access-list label {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+        font-size: 0.85rem;
+      }
     </style>
   </head>
   <body>
@@ -60,6 +76,7 @@
                 <th>Job title</th>
                 <th>Phone</th>
                 <th>Requested</th>
+                <th>App access on approval</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -73,10 +90,21 @@
                   <td><%= user.phone || '—' %></td>
                   <td><%= new Date(user.createdAt).toLocaleString() %></td>
                   <td>
+                    <form class="app-access-form" method="POST" action="/admin/users/<%= user.id %>/approve">
+                      <input type="hidden" name="redirectTo" value="/admin/pending" />
+                      <div class="app-access-list">
+                        <% allApps.forEach(app => { %>
+                          <label>
+                            <input type="checkbox" name="allowedApps" value="<%= app.slug %>" />
+                            <span><%= app.name %></span>
+                          </label>
+                        <% }) %>
+                      </div>
+                      <button class="button" type="submit">Approve</button>
+                    </form>
+                  </td>
+                  <td>
                     <div class="actions">
-                      <form method="POST" action="/admin/users/<%= user.id %>/approve">
-                        <button class="button" type="submit">Approve</button>
-                      </form>
                       <form method="POST" action="/admin/users/<%= user.id %>/reject">
                         <button class="button secondary" type="submit">Reject</button>
                       </form>

@@ -48,9 +48,15 @@ describe('Admin approvals', () => {
       .get();
     expect(emails).toEqual(expect.arrayContaining(['pending@example.com', 'reject@example.com']));
 
-    await agent.post(`/admin/users/${pendingUser.id}/approve`).expect(302).expect('Location', '/admin');
+    await agent
+      .post(`/admin/users/${pendingUser.id}/approve`)
+      .type('form')
+      .send('allowedApps=dart&allowedApps=skylens')
+      .expect(302)
+      .expect('Location', '/admin');
     const approvedUser = await db.findUserById(pendingUser.id);
     expect(approvedUser.approved).toBe(1);
+    expect(approvedUser.allowedApps).toEqual(['dart', 'skylens']);
 
     await agent.post(`/admin/users/${rejectUser.id}/reject`).expect(302).expect('Location', '/admin/pending');
     const rejectedUser = await db.findUserById(rejectUser.id);
