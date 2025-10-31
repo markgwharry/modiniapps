@@ -49,6 +49,7 @@ async function authenticateUser(email, password) {
     isAdmin: user.isAdmin,
     approved: user.approved,
     createdAt: user.createdAt,
+    allowedApps: Array.isArray(user.allowedApps) ? user.allowedApps : [],
   };
 }
 
@@ -63,6 +64,7 @@ function sanitizeUser(user) {
     isAdmin: user.isAdmin,
     approved: user.approved,
     createdAt: user.createdAt,
+    allowedApps: Array.isArray(user.allowedApps) ? user.allowedApps : [],
   };
 }
 
