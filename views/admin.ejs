@@ -48,6 +48,22 @@
         background-color: #d1ecf1;
         color: #0c5460;
       }
+      .app-access-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .app-access-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.35rem 0.75rem;
+      }
+      .app-access-list label {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+        font-size: 0.85rem;
+      }
     </style>
   </head>
   <body>
@@ -78,6 +94,7 @@
                 <th>Status</th>
                 <th>Role</th>
                 <th>Created</th>
+                <th>App access</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -104,6 +121,25 @@
                     <% } %>
                   </td>
                   <td><%= new Date(user.createdAt).toLocaleDateString() %></td>
+                  <td>
+                    <form class="app-access-form" method="POST" action="/admin/users/<%= user.id %>/apps">
+                      <input type="hidden" name="redirectTo" value="/admin" />
+                      <div class="app-access-list">
+                        <% allApps.forEach(app => { %>
+                          <label>
+                            <input
+                              type="checkbox"
+                              name="allowedApps"
+                              value="<%= app.slug %>"
+                              <%= Array.isArray(user.allowedApps) && user.allowedApps.includes(app.slug) ? 'checked' : '' %>
+                            />
+                            <span><%= app.name %></span>
+                          </label>
+                        <% }); %>
+                      </div>
+                      <button type="submit" class="button secondary">Save access</button>
+                    </form>
+                  </td>
                   <td>
                     <div class="actions">
                       <% if (!user.approved) { %>

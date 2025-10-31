@@ -26,6 +26,7 @@ const {
   getPendingUsers,
   updateUserProfile,
   deleteUser,
+  setUserApps,
 } = require('./db');
 const {
   PORT,
@@ -38,6 +39,52 @@ const {
 } = require('./config/env');
 
 const apps = loadApps();
+const appCatalog = new Map(apps.map((entry) => [entry.slug, entry]));
+const appSlugs = new Set(apps.map((entry) => entry.slug));
+
+function normalizeAllowedAppSlugs(input) {
+  if (!input) {
+    return [];
+  }
+
+  const values = Array.isArray(input) ? input : [input];
+  const unique = new Set();
+
+  for (const rawValue of values) {
+    if (typeof rawValue !== 'string') {
+      continue;
+    }
+
+    for (const fragment of rawValue.split(',')) {
+      const slug = fragment.trim();
+      if (!slug || !appSlugs.has(slug)) {
+        continue;
+      }
+      unique.add(slug);
+    }
+  }
+
+  return Array.from(unique);
+}
+
+function resolveAccessibleApps(user) {
+  if (!user) {
+    return { entries: [], slugs: [] };
+  }
+
+  if (user.isAdmin) {
+    const entries = apps.map((entry) => ({ ...entry }));
+    return { entries, slugs: entries.map((entry) => entry.slug) };
+  }
+
+  const allowedSlugs = new Set(normalizeAllowedAppSlugs(user.allowedApps));
+  const entries = apps.filter((entry) => allowedSlugs.has(entry.slug));
+  return { entries, slugs: entries.map((entry) => entry.slug) };
+}
+
+function extractAllowedAppsFromRequest(req) {
+  return normalizeAllowedAppSlugs(req.body?.allowedApps);
+}
 const app = express();
 
 function validateProfileInput(profile) {
@@ -193,7 +240,11 @@ app.use(async (req, res, next) => {
       console.error('Failed to load user from session', error);
     }
   }
-  res.locals.apps = apps;
+
+  const { entries: accessibleApps, slugs: accessibleSlugs } = resolveAccessibleApps(req.user);
+  req.permittedApps = accessibleApps;
+  req.permittedAppSlugs = accessibleSlugs;
+  res.locals.apps = accessibleApps;
   next();
 });
 
@@ -407,15 +458,21 @@ app.get('/auth/logout', (req, res, next) => {
 });
 
 app.get('/apps/:slug', requireAuth, (req, res) => {
-  const appEntry = apps.find((entry) => entry.slug === req.params.slug);
+  const targetSlug = req.params.slug;
+  const appEntry = appCatalog.get(targetSlug);
   if (!appEntry) {
     return res.status(404).render('error', { message: 'App not found' });
   }
+
+  if (!req.permittedAppSlugs?.includes(targetSlug)) {
+    return res.status(403).render('error', { message: 'You do not have access to this application' });
+  }
+
   return res.redirect(appEntry.url);
 });
 
 app.get('/api/apps', requireAuth, (req, res) => {
-  res.json({ apps });
+  res.json({ apps: req.permittedApps || [] });
 });
 
 app.get('/api/profile', requireAuth, (req, res) => {
@@ -475,22 +532,29 @@ app.get('/api/auth/session', (req, res) => {
     return res.status(401).json({ authenticated: false });
   }
   const user = sanitizeUser(req.user);
+  const permittedApps = req.permittedApps || [];
+  const permittedSlugs = req.permittedAppSlugs || [];
+
   if (user) {
+    user.allowedApps = permittedSlugs;
     try {
-      const encodedUser = Buffer.from(JSON.stringify(user), 'utf8').toString('base64url');
+      const encodedUser = Buffer.from(
+        JSON.stringify({ ...user, apps: permittedApps }),
+        'utf8'
+      ).toString('base64url');
       res.set('X-Forwarded-User', encodedUser);
     } catch (error) {
       console.error('Failed to encode forwarded user payload', error);
     }
   }
-  return res.json({ authenticated: true, user });
+  return res.json({ authenticated: true, user, apps: permittedApps });
 });
 
 // Admin routes
 app.get('/admin', requireAuth, requireAdmin, async (req, res) => {
   try {
     const [users, pendingUsers] = await Promise.all([getAllUsers(), getPendingUsers()]);
-    return res.render('admin', { users, pendingCount: pendingUsers.length });
+    return res.render('admin', { users, pendingCount: pendingUsers.length, allApps: apps });
   } catch (error) {
     console.error('Failed to load users', error);
     return res.status(500).render('error', { message: 'Failed to load admin panel' });
@@ -500,17 +564,36 @@ app.get('/admin', requireAuth, requireAdmin, async (req, res) => {
 app.get('/admin/pending', requireAuth, requireAdmin, async (req, res) => {
   try {
     const pendingUsers = await getPendingUsers();
-    return res.render('admin-pending', { users: pendingUsers });
+    return res.render('admin-pending', { users: pendingUsers, allApps: apps });
   } catch (error) {
     console.error('Failed to load pending users', error);
     return res.status(500).render('error', { message: 'Failed to load pending users' });
   }
 });
 
+app.post('/admin/users/:id/apps', requireAuth, requireAdmin, async (req, res) => {
+  const redirectTo = req.body?.redirectTo || '/admin';
+  try {
+    const allowedApps = extractAllowedAppsFromRequest(req);
+    const user = await findUserById(req.params.id);
+    if (!user) {
+      return res.status(404).render('error', { message: 'User not found' });
+    }
+
+    await setUserApps(req.params.id, allowedApps);
+    return res.redirect(redirectTo);
+  } catch (error) {
+    console.error('Failed to update user apps', error);
+    return res.status(500).render('error', { message: 'Failed to update user apps' });
+  }
+});
+
 app.post('/admin/users/:id/approve', requireAuth, requireAdmin, async (req, res) => {
   try {
-    await approvePendingUser(req.params.id);
-    return res.redirect('/admin');
+    const allowedApps = extractAllowedAppsFromRequest(req);
+    const redirectTo = req.body?.redirectTo || '/admin';
+    await approvePendingUser(req.params.id, allowedApps);
+    return res.redirect(redirectTo);
   } catch (error) {
     if (error.code === 'USER_NOT_FOUND') {
       return res.status(404).render('error', { message: 'User not found' });
