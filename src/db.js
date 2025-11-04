@@ -32,6 +32,19 @@ db.serialize(() => {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`
   );
+  db.run(
+    `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      used INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`
+  );
+  db.run(`CREATE INDEX IF NOT EXISTS idx_reset_token ON password_reset_tokens(token)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_reset_user_id ON password_reset_tokens(user_id)`);
 });
 
 function ensureColumn(column, sql) {
@@ -251,6 +264,37 @@ function closeDatabase() {
   });
 }
 
+async function createPasswordResetToken(userId, token, expiresAt) {
+  const stmt = `INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)`;
+  const result = await runAsync(stmt, [userId, token, expiresAt]);
+  return {
+    id: result.lastID,
+    userId,
+    token,
+    expiresAt,
+  };
+}
+
+async function findPasswordResetToken(token) {
+  const stmt = `SELECT id, user_id as userId, token, expires_at as expiresAt, used, created_at as createdAt FROM password_reset_tokens WHERE token = ?`;
+  return getAsync(stmt, [token]);
+}
+
+async function markTokenAsUsed(tokenId) {
+  const stmt = `UPDATE password_reset_tokens SET used = 1 WHERE id = ?`;
+  return runAsync(stmt, [tokenId]);
+}
+
+async function deletePasswordResetTokensForUser(userId) {
+  const stmt = `DELETE FROM password_reset_tokens WHERE user_id = ?`;
+  return runAsync(stmt, [userId]);
+}
+
+async function deleteExpiredPasswordResetTokens() {
+  const stmt = `DELETE FROM password_reset_tokens WHERE expires_at < datetime('now')`;
+  return runAsync(stmt);
+}
+
 module.exports = {
   createUser,
   findUserByEmail,
@@ -267,4 +311,9 @@ module.exports = {
   deleteUser,
   clearUsers,
   closeDatabase,
+  createPasswordResetToken,
+  findPasswordResetToken,
+  markTokenAsUsed,
+  deletePasswordResetTokensForUser,
+  deleteExpiredPasswordResetTokens,
 };

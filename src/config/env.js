@@ -33,6 +33,7 @@ const MAIL_ADMIN_RECIPIENTS = (process.env.MAIL_ADMIN_RECIPIENTS || process.env.
   .map((email) => email.trim())
   .filter(Boolean);
 const MAIL_ENABLED = Boolean(MAIL_HOST);
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
 ensureDirExists(DATABASE_PATH);
 ensureDirExists(SESSION_DB_PATH);
@@ -54,4 +55,5 @@ module.exports = {
   MAIL_FROM,
   MAIL_ADMIN_RECIPIENTS,
   MAIL_ENABLED,
+  PUBLIC_BASE_URL,
 };

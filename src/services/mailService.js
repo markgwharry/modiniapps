@@ -1,6 +1,6 @@
 const path = require('path');
 const ejs = require('ejs');
-const { MAIL_FROM, MAIL_ADMIN_RECIPIENTS } = require('../config/env');
+const { MAIL_FROM, MAIL_ADMIN_RECIPIENTS, PUBLIC_BASE_URL } = require('../config/env');
 const { getTransporter, isMailConfigured } = require('../config/mail');
 
 async function renderTemplate(templateName, context) {
@@ -66,9 +66,21 @@ async function sendUserApprovalEmail(user, temporaryPassword) {
   });
 }
 
+async function sendPasswordResetEmail(user, token) {
+  const resetUrl = `${PUBLIC_BASE_URL}/reset-password?token=${token}`;
+  const context = { user, resetUrl, token };
+  const template = await renderTemplate('password-reset', context);
+  await deliver({
+    to: user.email,
+    subject: 'Reset your Modini Apps password',
+    ...template,
+  });
+}
+
 module.exports = {
   sendPendingRegistrationEmails,
   sendUserApprovalEmail,
+  sendPasswordResetEmail,
   // Exported for testing/mocking convenience
   renderTemplate,
 };
