@@ -19,6 +19,7 @@ const {
 } = require('./services/authService');
 const { sendPendingRegistrationEmails } = require('./services/mailService');
 const { approvePendingUser } = require('./services/userApprovalService');
+const { requestPasswordReset, validateResetToken, resetPassword } = require('./services/passwordResetService');
 const {
   updateUserAdmin,
   updateUserApproval,
@@ -455,6 +456,128 @@ app.post('/auth/logout', (req, res, next) => {
 app.get('/auth/logout', (req, res, next) => {
   const redirectTo = req.query.redirect;
   handleLogout(req, res, next, redirectTo);
+});
+
+// Password reset routes
+app.get('/forgot-password', (req, res) => {
+  if (req.session && req.session.userId) {
+    return res.redirect('/');
+  }
+  return res.render('forgot-password', { error: null, success: null });
+});
+
+app.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).render('forgot-password', {
+      error: 'Email address is required',
+      success: null,
+    });
+  }
+
+  try {
+    const result = await requestPasswordReset(email);
+    return res.render('forgot-password', {
+      error: null,
+      success: result.message,
+    });
+  } catch (error) {
+    console.error('Failed to request password reset', error);
+    return res.status(500).render('forgot-password', {
+      error: 'An error occurred. Please try again later.',
+      success: null,
+    });
+  }
+});
+
+app.get('/reset-password', async (req, res) => {
+  const { token } = req.query;
+
+  if (!token) {
+    return res.render('reset-password', {
+      error: 'Invalid or missing reset token',
+      success: null,
+      token: null,
+    });
+  }
+
+  try {
+    const validation = await validateResetToken(token);
+    if (!validation.valid) {
+      return res.render('reset-password', {
+        error: validation.error,
+        success: null,
+        token: null,
+      });
+    }
+
+    return res.render('reset-password', {
+      error: null,
+      success: null,
+      token,
+    });
+  } catch (error) {
+    console.error('Failed to validate reset token', error);
+    return res.status(500).render('reset-password', {
+      error: 'An error occurred. Please try again later.',
+      success: null,
+      token: null,
+    });
+  }
+});
+
+app.post('/reset-password', async (req, res) => {
+  const { token, newPassword, confirmPassword } = req.body;
+
+  if (!token) {
+    return res.status(400).render('reset-password', {
+      error: 'Invalid or missing reset token',
+      success: null,
+      token: null,
+    });
+  }
+
+  if (!newPassword) {
+    return res.status(400).render('reset-password', {
+      error: 'New password is required',
+      success: null,
+      token,
+    });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).render('reset-password', {
+      error: 'Passwords do not match',
+      success: null,
+      token,
+    });
+  }
+
+  try {
+    const result = await resetPassword(token, newPassword);
+
+    if (!result.success) {
+      return res.status(400).render('reset-password', {
+        error: result.message,
+        success: null,
+        token,
+      });
+    }
+
+    return res.render('reset-password', {
+      error: null,
+      success: result.message,
+      token: null,
+    });
+  } catch (error) {
+    console.error('Failed to reset password', error);
+    return res.status(500).render('reset-password', {
+      error: 'An error occurred. Please try again later.',
+      success: null,
+      token,
+    });
+  }
 });
 
 app.get('/apps/:slug', requireAuth, (req, res) => {

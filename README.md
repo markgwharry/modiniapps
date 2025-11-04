@@ -12,6 +12,9 @@ The repo intentionally contains **all logic related to authentication and multi-
 ## Features
 
 - Email + password authentication with passwords hashed using `bcrypt` and persisted in SQLite.
+- User registration with admin approval workflow and email notifications.
+- Password reset flow with secure time-limited tokens sent via email.
+- Password change functionality for authenticated users.
 - Sessions stored in SQLite and surfaced to subdomains via a shared cookie (`modiniapps.sid` by default).
 - Responsive, theme-aware front end for signing in, registering and selecting applications.
 - API endpoint (`/api/auth/session`) that downstream apps can call (with credentials) to validate the logged-in user.
@@ -77,6 +80,23 @@ PUBLIC_BASE_URL=https://apps.example.com
 ```
 
 `MAIL_ADMIN_RECIPIENTS` accepts a comma-separated list of addresses. `PUBLIC_BASE_URL` is optional but recommended so links in the emails point back to the correct environment.
+
+## Password reset
+
+Users can reset their password via the "Forgot your password?" link on the login page. The password reset flow works as follows:
+
+1. User enters their email address on the `/forgot-password` page
+2. If an approved account exists with that email, the system generates a secure reset token and sends an email with a reset link
+3. The reset link is valid for 1 hour and contains a unique token
+4. User clicks the link and is taken to `/reset-password?token=...` where they can set a new password
+5. After successfully resetting, the user can log in with their new password
+
+Security features:
+- Reset tokens are stored securely in the database with expiration timestamps
+- Tokens can only be used once - they are marked as used after a successful reset
+- The system does not reveal whether an email address exists in the database (to prevent email enumeration)
+- Requesting a new reset invalidates any previous unused tokens for that user
+- Password reset is only available for approved users (and admins)
 
 ## Configuring apps
 
